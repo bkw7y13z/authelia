@@ -19,6 +19,7 @@ const (
 
 const (
 	masterTag    = "master"
+	stringTrue   = "true"
 	stringFalse  = "false"
 	webDirectory = "web"
 )

@@ -94,7 +94,7 @@ func (d *Docker) Manifest(image string, tags []string) error {
 			",annotation[linux/arm/v7].org.opencontainers.image.base.digest="+digestARM+
 			",annotation[linux/arm64].org.opencontainers.image.base.digest="+digestARM64,
 		"--platform", "linux/amd64,linux/arm/v7,linux/arm64",
-		"--provenance", "mode=max,reproducible=true", "--sbom", "true",
+		"--provenance", "mode=max,reproducible=true", "--sbom", stringTrue,
 		"--builder", "buildx", "--push", ".")
 
 	if err = utils.CommandWithStdout("docker", finalArgs...).Run(); err != nil {
@@ -162,5 +162,5 @@ func getManifestIndexDigest(tag string) (digest string, err error) {
 }
 
 func isPrivatePipeline(pipeline string) bool {
-	return utils.IsStringInSlice(pipeline, buildkitePrivatePipelines)
+	return utils.IsStringInSlice(pipeline, buildkitePrivatePipelines) || os.Getenv("CI_PRIVATE") == stringTrue
 }
