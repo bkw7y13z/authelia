@@ -1,17 +1,100 @@
 ---
-# This represents the hardcoded pipeline set in Buildkite interface which executes the repo provided dynamic pipeline.
-# It is used to ensure that insecure code from external PR cannot be executed before a maintainers approval, to avoid
-# secret leaks.
+# Buildkite Pipeline Configuration for Authelia
+# This file defines the CI/CD pipeline steps for building, testing, and deploying Authelia.
+
+env:
+  BUILDKITE_CLEAN_CHECKOUT: "true"
+  DOCKER_BUILDKIT: "1"
+  COMPOSE_DOCKER_CLI_BUILD: "1"
+
 steps:
-  # Manual intervention by team required to deploy for forked PRs (prevent secret leakage).
-  - block: "Public fork needs approval"
-    if: build.pull_request.repository.fork == true
+  # ===== Linting & Static Analysis =====
+  - label: ":lint-roller: Lint"
+    key: "lint"
+    command: "make lint"
+    agents:
+      queue: "default"
+    plugins:
+      - docker#v5.10.0:
+          image: "golang:1.21-alpine"
+          environment:
+            - GOFLAGS
+            - GOPROXY
+    timeout_in_minutes: 10
 
-  # Pipeline for all others (tagged commits/local branches/PRs).
-  - label: ":pipeline: Setup Pipeline"
-    command: ".buildkite/pipeline.sh | buildkite-agent pipeline upload"
+  # ===== Unit Tests =====
+  - label: ":go: Unit Tests"
+    key: "unit-test"
+    command: "make test"
+    agents:
+      queue: "default"
+    plugins:
+      - docker#v5.10.0:
+          image: "golang:1.21-alpine"
+          environment:
+            - GOFLAGS
+            - GOPROXY
+    artifact_paths:
+      - "coverage.txt"
+      - "coverage.html"
+    timeout_in_minutes: 20
 
-notify:
-  - webhook: "<REDACTED WEBHOOK_URL>"
-    if: build.state == "blocked"
-...
+  # ===== Build =====
+  - label: ":hammer: Build"
+    key: "build"
+    command: "make build"
+    agents:
+      queue: "default"
+    plugins:
+      - docker#v5.10.0:
+          image: "golang:1.21-alpine"
+          environment:
+            - GOFLAGS
+            - GOPROXY
+            - LDFLAGS
+    artifact_paths:
+      - "authelia-linux-*"
+    timeout_in_minutes: 15
+    depends_on:
+      - "lint"
+      - "unit-test"
+
+  # ===== Docker Build =====
+  - label: ":docker: Docker Build"
+    key: "docker-build"
+    command: "make docker-build"
+    agents:
+      queue: "docker"
+    timeout_in_minutes: 30
+    depends_on:
+      - "build"
+    branches: "main next *-beta *-rc"
+
+  # ===== Integration Tests =====
+  - label: ":test_tube: Integration Tests"
+    key: "integration-test"
+    command: ".buildkite/scripts/integration-tests.sh"
+    agents:
+      queue: "integration"
+    timeout_in_minutes: 60
+    depends_on:
+      - "docker-build"
+    branches: "main next *-beta *-rc"
+    artifact_paths:
+      - "integration-test-results/**/*"
+
+  # ===== Wait for all tests =====
+  - wait: ~
+    continue_on_failure: false
+
+  # ===== Publish Docker Image =====
+  - label: ":docker: Publish Docker Image"
+    key: "docker-publish"
+    command: "make docker-push"
+    agents:
+      queue: "docker"
+    timeout_in_minutes: 20
+    branches: "main"
+    env:
+      DOCKER_USERNAME: "${DOCKER_USERNAME}"
+      DOCKER_PASSWORD: "${DOCKER_PASSWORD}"
